@@ -148,6 +148,10 @@ def build_prompt(document_text: str) -> str:
 def evaluate_proposal(document_text: str, api_key: str) -> Optional[str]:
     """Send the proposal and evaluation instructions to the OpenAI API.
 
+    This helper supports both the legacy ``openai<1.0`` API and the newer
+    ``openai>=1.0`` client interface.  It constructs a prompt based on the
+    uploaded proposal and returns the model's response or ``None`` on error.
+
     Parameters
     ----------
     document_text: str
@@ -161,9 +165,11 @@ def evaluate_proposal(document_text: str, api_key: str) -> Optional[str]:
     Optional[str]
         The AI's response text, or None if an error occurred.
     """
+    # Ensure the openai module is available
     if openai is None:
         st.error(
-            "The openai package is not available.  Please ensure it is installed."
+            "The openai package is not installed.  Please add it to requirements.txt "
+            "and reinstall."
         )
         return None
 
@@ -171,17 +177,36 @@ def evaluate_proposal(document_text: str, api_key: str) -> Optional[str]:
         st.error("Please provide a valid OpenAI API key.")
         return None
 
-    openai.api_key = api_key
     prompt = build_prompt(document_text)
 
+    model_name = "gpt-5-mini-2025-08-07"
+    messages = [{"role": "user", "content": prompt}]
+
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-5-mini-2025-08-07",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1024,
-        )
-        return response["choices"][0]["message"]["content"].strip()
+        # Detect whether the legacy API is available.  In openai>=1.0 the
+        # ChatCompletion class has been removed in favour of a client API.
+        if hasattr(openai, "ChatCompletion"):
+            # Legacy usage (openai<1.0)
+            openai.api_key = api_key
+            response = openai.ChatCompletion.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            return response["choices"][0]["message"]["content"].strip()
+        else:
+            # New client-based API (openai>=1.0)
+            # Create a client instance with the provided API key
+            client = openai.OpenAI(api_key=api_key)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            # The new API returns a Completion object; extract the content
+            return completion.choices[0].message.content.strip()
     except Exception as exc:
         st.error(f"Error communicating with OpenAI API: {exc}")
         return None
